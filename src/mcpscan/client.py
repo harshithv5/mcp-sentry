@@ -28,27 +28,27 @@ async def list_tools(session: ClientSession) -> list[ToolInfo]:
     ]
 
 
-if __name__ == "__main__":
-    import asyncio
+# if __name__ == "__main__":
+#     import asyncio
 
-    async def _test() -> None:
-        url = "http://127.0.0.1:8000/mcp"
-        print(f"Connecting to {url} ...")
-        async with create_mcp_client(url) as session:
-            print("Connection OK. Listing tools...\n")
-            tools = await list_tools(session)
+#     async def _test() -> None:
+#         url = "http://127.0.0.1:8000/mcp"
+#         print(f"Connecting to {url} ...")
+#         async with create_mcp_client(url) as session:
+#             print("Connection OK. Listing tools...\n")
+#             tools = await list_tools(session)
 
-        if not tools:
-            print("Server returned no tools.")
-            return
+#         if not tools:
+#             print("Server returned no tools.")
+#             return
 
-        print(f"{len(tools)} tool(s) found:\n")
-        for t in tools:
-            print(t.all_text_fields)
-            print(f"  {t.name}")
-            if t.description:
-                print(f"    {t.description.strip()}")
-            if t.input_schema:
-                print(f"    schema: {t.input_schema}")
+#         print(f"{len(tools)} tool(s) found:\n")
+#         for t in tools:
+#             print(t.all_text_fields)
+#             print(f"  {t.name}")
+#             if t.description:
+#                 print(f"    {t.description.strip()}")
+#             if t.input_schema:
+#                 print(f"    schema: {t.input_schema}")
 
-    asyncio.run(_test())
+#     asyncio.run(_test())
