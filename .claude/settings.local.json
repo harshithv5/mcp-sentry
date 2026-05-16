@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p mcp-scanner/src/mcpscan/detectors/static mcp-scanner/src/mcpscan/detectors/dynamic mcp-scanner/src/mcpscan/reporter/templates mcp-scanner/tests/fixtures/malicious_servers)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\harsh\\PycharmProjects\\mcp-sentry\\mcp-scanner\\src\\mcpscan\\detectors"
+    ]
+  }
+}
