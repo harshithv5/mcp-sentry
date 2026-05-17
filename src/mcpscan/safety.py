@@ -148,7 +148,31 @@ def extract_response_text(result: CallToolResult | None) -> str:
     return "".join(chunks)
 
 
-# --- 5. Rate-limited, bounded-latency tool call ---------------------------
+# --- 5. Error-response heuristic ------------------------------------------
+
+_ERROR_INDICATORS: tuple[str, ...] = (
+    "error", "exception", "traceback",
+    "not found", "no such file", "no such host",
+    "invalid", "denied", "forbidden", "unauthorized",
+    "could not", "cannot", "failed",
+    "connection refused", "timeout", "timed out",
+    "not allowed", "blocked",
+)
+
+
+def looks_like_error(response: str) -> bool:
+    """Return True if *response* reads like a server-side error message.
+
+    Used by probe detectors to distinguish 'server rejected the payload' from
+    'server happily processed the payload and returned something'.
+    """
+    if not response:
+        return False
+    haystack = response.lower()
+    return any(token in haystack for token in _ERROR_INDICATORS)
+
+
+# --- 6. Rate-limited, bounded-latency tool call ---------------------------
 
 
 async def rate_limited_call(

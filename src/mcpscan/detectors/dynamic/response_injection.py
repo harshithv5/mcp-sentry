@@ -18,9 +18,7 @@ import asyncio
 import logging
 import re
 import unicodedata
-
 from mcp import ClientSession
-
 from ..base import DynamicDetector
 from ..patterns import (
     INJECTION_PATTERNS,

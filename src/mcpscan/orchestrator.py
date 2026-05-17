@@ -17,8 +17,11 @@ from mcp import ClientSession
 
 from .client import create_mcp_client, list_tools
 from .detectors.base import Detector, DynamicDetector
+from .detectors.dynamic.credential_probe import CredentialProbeDetector
 from .detectors.dynamic.echo_test import EchoTestDetector
+from .detectors.dynamic.path_traversal import PathTraversalDetector
 from .detectors.dynamic.response_injection import ResponseInjectionDetector
+from .detectors.dynamic.ssrf_probe import SsrfProbeDetector
 from .detectors.static.hidden_unicode import HiddenUnicodeDetector
 from .detectors.static.injection_phrases import InjectionPhrasesDetector
 from .detectors.static.lethal_trifecta import LethalTrifectaDetector
@@ -45,6 +48,8 @@ STATIC_DETECTORS: list[Detector] = [
 DYNAMIC_DETECTORS: list[DynamicDetector] = [
     EchoTestDetector(),
     ResponseInjectionDetector(),
+    PathTraversalDetector(),
+    CredentialProbeDetector(),
 ]
 
 # Score deducted per finding, by severity. Score floors at 0.
@@ -88,23 +93,36 @@ def _run_static(tools: list[ToolInfo]) -> list[Finding]:
     return findings
 
 
-async def _run_dynamic(tools: list[ToolInfo], session: ClientSession) -> list[Finding]:
+async def _run_dynamic(
+    tools: list[ToolInfo],
+    session: ClientSession,
+    *,
+    enable_ssrf: bool = False,
+) -> list[Finding]:
     findings: list[Finding] = []
+    ssrf_detector = SsrfProbeDetector() if enable_ssrf else None
     for tool in tools:
         if classify_tool(tool) == "destructive":
             continue
         for detector in DYNAMIC_DETECTORS:
             findings.extend(await detector.check(tool, session))
+        if ssrf_detector is not None:
+            findings.extend(await ssrf_detector.check(tool, session))
     return findings
 
 
-async def build_report(target_url: str, *, skip_dynamic: bool = False) -> ScanReport:
+async def build_report(
+    target_url: str,
+    *,
+    skip_dynamic: bool = False,
+    enable_ssrf: bool = False,
+) -> ScanReport:
     started = datetime.now()
     async with create_mcp_client(url=target_url) as session:
         tools = await list_tools(session)
         findings = _run_static(tools)
         if not skip_dynamic:
-            findings.extend(await _run_dynamic(tools, session))
+            findings.extend(await _run_dynamic(tools, session, enable_ssrf=enable_ssrf))
 
     score, grade = _score(findings)
     elapsed_ms = int((datetime.now() - started).total_seconds() * 1000)
@@ -126,8 +144,11 @@ if __name__ == "__main__":
 
     args = sys.argv[1:]
     skip_dynamic = "--skip-dynamic" in args
-    args = [a for a in args if a != "--skip-dynamic"]
+    enable_ssrf = "--enable-ssrf" in args
+    args = [a for a in args if a not in ("--skip-dynamic", "--enable-ssrf")]
     url = args[0] if args else "https://mcp.deepwiki.com/mcp"
 
-    report = asyncio.run(build_report(url, skip_dynamic=skip_dynamic))
+    report = asyncio.run(
+        build_report(url, skip_dynamic=skip_dynamic, enable_ssrf=enable_ssrf)
+    )
     print(render_markdown(report))

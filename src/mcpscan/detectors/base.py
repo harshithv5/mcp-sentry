@@ -31,10 +31,11 @@ class _BaseDetector(ABC):
         message: str,
         suggested_fix: str,
         confirmed: bool = False,
+        severity: Severity | None = None,
     ) -> Finding:
         return Finding(
             rule_id=self.rule_id,
-            severity=self.severity,
+            severity=severity if severity is not None else self.severity,
             tool_name=tool.name,
             field=field,
             evidence=evidence,
