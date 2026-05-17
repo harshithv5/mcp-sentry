@@ -1,14 +1,24 @@
 """Scan orchestrator.
 
-Connects to an MCP server, runs every static detector against every tool,
-runs every server-level detector against the full tool list, scores the
-result, and returns a fully populated ScanReport.
+Two phases against one MCP session:
+
+1. Static phase  — every static detector runs against every tool's metadata.
+                   Server-level static detectors run once over the full list.
+2. Dynamic phase — every dynamic detector runs against every *safe* tool by
+                   actually invoking it. Tools classified as destructive are
+                   skipped. Pass `skip_dynamic=True` to bypass this phase.
+
+The final ScanReport carries the merged findings, a 0–100 score, and a grade.
 """
 import asyncio
 from datetime import datetime
 
+from mcp import ClientSession
+
 from .client import create_mcp_client, list_tools
-from .detectors.base import Detector
+from .detectors.base import Detector, DynamicDetector
+from .detectors.dynamic.echo_test import EchoTestDetector
+from .detectors.dynamic.response_injection import ResponseInjectionDetector
 from .detectors.static.hidden_unicode import HiddenUnicodeDetector
 from .detectors.static.injection_phrases import InjectionPhrasesDetector
 from .detectors.static.lethal_trifecta import LethalTrifectaDetector
@@ -18,9 +28,10 @@ from .detectors.static.sensitive_paths import SensitivePathsDetector
 from .detectors.static.suspicious_tags import SuspiciousTagsDetector
 from .detectors.static.tool_shadowing import ToolShadowingDetector
 from .models import Finding, ScanReport, Severity, ToolInfo
+from .safety import classify_tool
 
 
-DETECTORS: list[Detector] = [
+STATIC_DETECTORS: list[Detector] = [
     SensitivePathsDetector(),
     InjectionPhrasesDetector(),
     SuspiciousTagsDetector(),
@@ -29,6 +40,11 @@ DETECTORS: list[Detector] = [
     ToolShadowingDetector(),
     SchemaValidatorDetector(),
     LethalTrifectaDetector(),
+]
+
+DYNAMIC_DETECTORS: list[DynamicDetector] = [
+    EchoTestDetector(),
+    ResponseInjectionDetector(),
 ]
 
 # Score deducted per finding, by severity. Score floors at 0.
@@ -61,9 +77,9 @@ def _score(findings: list[Finding]) -> tuple[int, str]:
     return score, _grade_for(score)
 
 
-def _run_detectors(tools: list[ToolInfo]) -> list[Finding]:
+def _run_static(tools: list[ToolInfo]) -> list[Finding]:
     findings: list[Finding] = []
-    for detector in DETECTORS:
+    for detector in STATIC_DETECTORS:
         if detector.is_server_level:
             findings.extend(detector.check_server(tools))  # type: ignore[attr-defined]
         else:
@@ -72,12 +88,24 @@ def _run_detectors(tools: list[ToolInfo]) -> list[Finding]:
     return findings
 
 
-async def build_report(target_url: str) -> ScanReport:
+async def _run_dynamic(tools: list[ToolInfo], session: ClientSession) -> list[Finding]:
+    findings: list[Finding] = []
+    for tool in tools:
+        if classify_tool(tool) == "destructive":
+            continue
+        for detector in DYNAMIC_DETECTORS:
+            findings.extend(await detector.check(tool, session))
+    return findings
+
+
+async def build_report(target_url: str, *, skip_dynamic: bool = False) -> ScanReport:
     started = datetime.now()
     async with create_mcp_client(url=target_url) as session:
         tools = await list_tools(session)
+        findings = _run_static(tools)
+        if not skip_dynamic:
+            findings.extend(await _run_dynamic(tools, session))
 
-    findings = _run_detectors(tools)
     score, grade = _score(findings)
     elapsed_ms = int((datetime.now() - started).total_seconds() * 1000)
 
@@ -96,6 +124,10 @@ if __name__ == "__main__":
 
     from .reporter.markdown import render_markdown
 
-    url = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8000/mcp"
-    report = asyncio.run(build_report(url))
+    args = sys.argv[1:]
+    skip_dynamic = "--skip-dynamic" in args
+    args = [a for a in args if a != "--skip-dynamic"]
+    url = args[0] if args else "https://mcp.deepwiki.com/mcp"
+
+    report = asyncio.run(build_report(url, skip_dynamic=skip_dynamic))
     print(render_markdown(report))

@@ -10,25 +10,9 @@ References:
 - Invariant Labs, "Tool Poisoning Attacks", 2025 (specifically the
   "concealment instructions" sub-pattern).
 """
-import re
-
 from ..base import Detector
+from ..patterns import SECRECY_PATTERNS
 from ...models import Finding, Severity, ToolInfo
-
-
-_SECRECY_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
-    re.compile(p, re.IGNORECASE)
-    for p in (
-        r"do(?:\s+not|n[’‘']?t)\s+(mention|tell|inform|reveal|show)",
-        r"without\s+(telling|informing|asking|notifying)\s+(the\s+)?(user|human)",
-        r"(silently|secretly|covertly|stealthily)",
-        r"(the\s+)?user\s+(should\s+not|must\s+not|cannot)\s+(see|know|be\s+told)",
-        r"keep\s+this\s+(secret|hidden|confidential|private)",
-        r"under\s+no\s+circumstances\s+(should\s+you|tell|mention|inform)",
-        r"before\s+(responding|replying|answering)(\s+to)?(\s+the)?\s+user",
-        r"do\s+not\s+include\s+this\s+in\s+(your|the)\s+(response|reply|answer)",
-    )
-)
 
 
 class SecrecyInstructionsDetector(Detector):
@@ -47,7 +31,7 @@ class SecrecyInstructionsDetector(Detector):
         for field, text in tool.labelled_text_fields:
             if not text:
                 continue
-            for pattern in _SECRECY_PATTERNS:
+            for pattern in SECRECY_PATTERNS:
                 match = pattern.search(text)
                 if match:
                     findings.append(

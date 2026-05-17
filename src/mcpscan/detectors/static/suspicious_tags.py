@@ -10,26 +10,10 @@ References:
 - Invariant Labs, "Tool Poisoning Attacks", 2025.
 - Llama / Mistral instruction-format documentation ([INST], <<SYS>>).
 """
-import re
-
 from ..base import Detector
+from ..patterns import TAG_PATTERNS
 from ...models import Finding, Severity, ToolInfo
 
-
-_TAG_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
-    re.compile(p, re.IGNORECASE | re.DOTALL)
-    for p in (
-        r"<\s*important\s*>.*?<\s*/\s*important\s*>",
-        r"<\s*system\s*>.*?<\s*/\s*system\s*>",
-        r"<\s*instructions?\s*>.*?<\s*/\s*instructions?\s*>",
-        r"<\s*admin\s*>.*?<\s*/\s*admin\s*>",
-        r"<\s*hidden\s*>.*?<\s*/\s*hidden\s*>",
-        r"<\s*secret\s*>.*?<\s*/\s*secret\s*>",
-        r"<\s*internal\s*>.*?<\s*/\s*internal\s*>",
-        r"\[INST\].*?\[/INST\]",
-        r"<<SYS>>.*?<</SYS>>",
-    )
-)
 
 _EVIDENCE_MAX = 200
 
@@ -50,7 +34,7 @@ class SuspiciousTagsDetector(Detector):
         for field, text in tool.labelled_text_fields:
             if not text:
                 continue
-            for pattern in _TAG_PATTERNS:
+            for pattern in TAG_PATTERNS:
                 match = pattern.search(text)
                 if match:
                     raw = match.group(0)

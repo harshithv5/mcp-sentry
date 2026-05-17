@@ -21,22 +21,8 @@ References:
 import unicodedata
 
 from ..base import Detector
+from ..patterns import categorize_hidden_codepoint
 from ...models import Finding, Severity, ToolInfo
-
-
-_ZERO_WIDTH = {0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF}
-
-
-def _categorize(codepoint: int) -> str | None:
-    if codepoint in _ZERO_WIDTH:
-        return "zero-width"
-    if 0x202A <= codepoint <= 0x202E or 0x2066 <= codepoint <= 0x2069:
-        return "directional-override"
-    if 0xE0000 <= codepoint <= 0xE007F:
-        return "unicode-tag"
-    if 0xFE00 <= codepoint <= 0xFE0F:
-        return "variation-selector"
-    return None
 
 
 class HiddenUnicodeDetector(Detector):
@@ -56,7 +42,7 @@ class HiddenUnicodeDetector(Detector):
                 continue
             buckets: dict[str, list[tuple[int, int]]] = {}  # category -> [(pos, codepoint)]
             for i, char in enumerate(text):
-                cat = _categorize(ord(char))
+                cat = categorize_hidden_codepoint(ord(char))
                 if cat is None:
                     continue
                 buckets.setdefault(cat, []).append((i, ord(char)))

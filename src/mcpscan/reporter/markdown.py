@@ -74,7 +74,8 @@ def render_markdown(report: ScanReport) -> str:
         lines.append(f"### {sev.value.upper()} ({len(bucket)})")
         lines.append("")
         for f in bucket:
-            lines.append(f"- **[{f.rule_id}]** `{f.tool_name}` · field `{f.field}`")
+            tag = " [CONFIRMED]" if f.confirmed else ""
+            lines.append(f"- **[{f.rule_id}]**{tag} `{f.tool_name}` · field `{f.field}`")
             lines.append(f"  - {f.message}")
             lines.append(f"  - Evidence: `{_truncate(f.evidence)}`")
             lines.append(f"  - Fix: {f.suggested_fix}")

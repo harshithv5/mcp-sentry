@@ -11,30 +11,9 @@ References:
   LLM-Integrated Applications with Indirect Prompt Injection", 2023.
 - OWASP LLM Top 10, LLM01: Prompt Injection.
 """
-import re
-
 from ..base import Detector
+from ..patterns import INJECTION_PATTERNS
 from ...models import Finding, Severity, ToolInfo
-
-
-_INJECTION_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
-    re.compile(p, re.IGNORECASE)
-    for p in (
-        r"ignore\s+(all\s+|the\s+)?previous\s+instructions",
-        r"disregard\s+(all\s+|the\s+)?(previous\s+|prior\s+|above\s+)?instructions",
-        r"you\s+are\s+now",
-        r"forget\s+(everything|all\s+previous|what\s+i\s+told\s+you)",
-        r"new\s+instructions:?",
-        r"developer\s+mode",
-        r"jailbreak",
-        r"from\s+now\s+on",
-        r"pretend\s+(to\s+be|you\s+are)",
-        r"act\s+as\s+(if\s+you\s+are|a)",
-        r"override\s+(the\s+|your\s+)?(system|safety|previous)",
-        r"system\s*:",
-        r"assistant\s*:",
-    )
-)
 
 
 class InjectionPhrasesDetector(Detector):
@@ -53,7 +32,7 @@ class InjectionPhrasesDetector(Detector):
         for field, text in tool.labelled_text_fields:
             if not text:
                 continue
-            for pattern in _INJECTION_PATTERNS:
+            for pattern in INJECTION_PATTERNS:
                 match = pattern.search(text)
                 if match:
                     findings.append(

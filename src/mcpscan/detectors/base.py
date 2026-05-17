@@ -1,24 +1,27 @@
-"""Abstract base class for all static and dynamic detectors.
+"""Abstract base classes for static, server-level, and dynamic detectors.
 
-Subclasses set the three class-level attributes (rule_id, severity, description)
-and override check(). The orchestrator drives every detector through this
-uniform interface, so adding a new rule is a matter of dropping a new subclass
-into detectors/static or detectors/dynamic.
+Three concrete shapes share a small set of helpers (`_make_finding`, `_dedupe`)
+and metadata fields (rule_id, severity, description):
+
+- `Detector`        — sync, per-tool inspection of static metadata.
+- `DynamicDetector` — async, per-tool, calls the tool via an MCP session.
+
+Server-level static detectors (e.g. S10 Lethal Trifecta) still inherit from
+`Detector`, set `is_server_level = True`, and implement `check_server(tools)`
+instead of `check(tool)`. The orchestrator dispatches on `is_server_level`.
 """
 from abc import ABC, abstractmethod
+
+from mcp import ClientSession
 
 from ..models import Finding, Severity, ToolInfo
 
 
-class Detector(ABC):
+class _BaseDetector(ABC):
     rule_id: str = ""
     severity: Severity = Severity.INFO
     description: str = ""
-    is_server_level: bool = False  # True => orchestrator calls check_server(tools) instead of check(tool)
-
-    @abstractmethod
-    def check(self, tool: ToolInfo) -> list[Finding]:
-        """Inspect a single tool and return any findings (empty list if clean)."""
+    is_server_level: bool = False
 
     def _make_finding(
         self,
@@ -27,6 +30,7 @@ class Detector(ABC):
         evidence: str,
         message: str,
         suggested_fix: str,
+        confirmed: bool = False,
     ) -> Finding:
         return Finding(
             rule_id=self.rule_id,
@@ -36,6 +40,7 @@ class Detector(ABC):
             evidence=evidence,
             message=message,
             suggested_fix=suggested_fix,
+            confirmed=confirmed,
         )
 
     @staticmethod
@@ -49,3 +54,19 @@ class Detector(ABC):
             seen.add(key)
             unique.append(f)
         return unique
+
+
+class Detector(_BaseDetector):
+    """Sync detector: inspects a single tool's static metadata."""
+
+    @abstractmethod
+    def check(self, tool: ToolInfo) -> list[Finding]:
+        """Inspect *tool* and return any findings (empty list if clean)."""
+
+
+class DynamicDetector(_BaseDetector):
+    """Async detector: actually invokes the tool on the live MCP session."""
+
+    @abstractmethod
+    async def check(self, tool: ToolInfo, session: ClientSession) -> list[Finding]:
+        """Probe *tool* on *session* and return any findings (empty list if clean)."""

@@ -42,10 +42,11 @@ class Finding(BaseModel):
     rule_id: str
     severity: Severity
     tool_name: str
-    field: str           # which tool field triggered the finding (name/description/param:x/server)
+    field: str           # which tool field triggered the finding (name/description/param:x/server/response)
     evidence: str        # the actual text that triggered the finding
     message: str         # human readable explanation
     suggested_fix: str   # what to do about it
+    confirmed: bool = False  # True for dynamic findings (proven by live probe), False for static (suspected)
 
 class ScanReport(BaseModel):
     target_url: str
