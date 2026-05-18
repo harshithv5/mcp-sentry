@@ -22,6 +22,7 @@ from .detectors.dynamic.echo_test import EchoTestDetector
 from .detectors.dynamic.path_traversal import PathTraversalDetector
 from .detectors.dynamic.response_injection import ResponseInjectionDetector
 from .detectors.dynamic.ssrf_probe import SsrfProbeDetector
+from .detectors.semantic.llm_judge import LLMJudgeDetector
 from .detectors.static.hidden_unicode import HiddenUnicodeDetector
 from .detectors.static.injection_phrases import InjectionPhrasesDetector
 from .detectors.static.lethal_trifecta import LethalTrifectaDetector
@@ -111,16 +112,41 @@ async def _run_dynamic(
     return findings
 
 
+async def _run_semantic(
+    tools: list[ToolInfo],
+    *,
+    groq_api_key: str,
+    threshold: float = 0.7,
+) -> list[Finding]:
+    """Phase 2 — semantic LLM judge. Off unless an API key is supplied."""
+    judge = LLMJudgeDetector(groq_api_key, threshold=threshold)
+    findings: list[Finding] = []
+    for tool in tools:
+        findings.extend(await judge.check(tool))
+    return findings
+
+
 async def build_report(
     target_url: str,
     *,
     skip_dynamic: bool = False,
     enable_ssrf: bool = False,
+    enable_llm_judge: bool = False,
+    groq_api_key: str | None = None,
+    judge_threshold: float = 0.7,
 ) -> ScanReport:
     started = datetime.now()
     async with create_mcp_client(url=target_url) as session:
         tools = await list_tools(session)
         findings = _run_static(tools)
+        if enable_llm_judge and groq_api_key:
+            findings.extend(
+                await _run_semantic(
+                    tools,
+                    groq_api_key=groq_api_key,
+                    threshold=judge_threshold,
+                )
+            )
         if not skip_dynamic:
             findings.extend(await _run_dynamic(tools, session, enable_ssrf=enable_ssrf))
 
@@ -137,18 +163,18 @@ async def build_report(
     )
 
 
-if __name__ == "__main__":
-    import sys
-
-    from .reporter.markdown import render_markdown
-
-    args = sys.argv[1:]
-    skip_dynamic = "--skip-dynamic" in args
-    enable_ssrf = "--enable-ssrf" in args
-    args = [a for a in args if a not in ("--skip-dynamic", "--enable-ssrf")]
-    url = args[0] if args else "https://mcp.deepwiki.com/mcp"
-
-    report = asyncio.run(
-        build_report(url, skip_dynamic=skip_dynamic, enable_ssrf=enable_ssrf)
-    )
-    print(render_markdown(report))
+# if __name__ == "__main__":
+#     import sys
+#
+#     from .reporter.markdown import render_markdown
+#
+#     args = sys.argv[1:]
+#     skip_dynamic = "--skip-dynamic" in args
+#     enable_ssrf = "--enable-ssrf" in args
+#     args = [a for a in args if a not in ("--skip-dynamic", "--enable-ssrf")]
+#     url = args[0] if args else "https://mcp.deepwiki.com/mcp"
+#
+#     report = asyncio.run(
+#         build_report(url, skip_dynamic=skip_dynamic, enable_ssrf=enable_ssrf)
+#     )
+#     print(render_markdown(report))

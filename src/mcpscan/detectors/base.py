@@ -1,10 +1,11 @@
-"""Abstract base classes for static, server-level, and dynamic detectors.
+"""Abstract base classes for static, semantic, and dynamic detectors.
 
 Three concrete shapes share a small set of helpers (`_make_finding`, `_dedupe`)
 and metadata fields (rule_id, severity, description):
 
-- `Detector`        — sync, per-tool inspection of static metadata.
-- `DynamicDetector` — async, per-tool, calls the tool via an MCP session.
+- `Detector`          — sync, per-tool inspection of static metadata.
+- `SemanticDetector`  — async, per-tool, makes outbound LLM calls (no MCP session).
+- `DynamicDetector`   — async, per-tool, calls the tool via an MCP session.
 
 Server-level static detectors (e.g. S10 Lethal Trifecta) still inherit from
 `Detector`, set `is_server_level = True`, and implement `check_server(tools)`
@@ -62,6 +63,19 @@ class Detector(_BaseDetector):
 
     @abstractmethod
     def check(self, tool: ToolInfo) -> list[Finding]:
+        """Inspect *tool* and return any findings (empty list if clean)."""
+
+
+class SemanticDetector(_BaseDetector):
+    """Async detector that calls an external LLM to classify tool metadata.
+
+    Does not touch the MCP session — only inspects tool text. Use when the
+    detection rule is semantic ("does this read like a prompt injection?")
+    rather than regex-shaped.
+    """
+
+    @abstractmethod
+    async def check(self, tool: ToolInfo) -> list[Finding]:
         """Inspect *tool* and return any findings (empty list if clean)."""
 
 

@@ -1,9 +1,15 @@
+import asyncio
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 from .models import ToolInfo
+
+
+class InvalidMcpEndpoint(ValueError):
+    """Raised when a URL is not a usable MCP endpoint."""
 
 
 @asynccontextmanager
@@ -21,34 +27,52 @@ async def list_tools(session: ClientSession) -> list[ToolInfo]:
     return [
         ToolInfo(
             name=tool.name,
-            description=tool.description ,
-            input_schema=tool.inputSchema
+            description=tool.description,
+            input_schema=tool.inputSchema,
         )
         for tool in result.tools
     ]
 
 
-# if __name__ == "__main__":
-#     import asyncio
+async def validate_mcp_endpoint(url: str, *, timeout: float = 5.0) -> dict:
+    """Verify that *url* speaks MCP. Returns server info on success.
 
-#     async def _test() -> None:
-#         url = "http://127.0.0.1:8000/mcp"
-#         print(f"Connecting to {url} ...")
-#         async with create_mcp_client(url) as session:
-#             print("Connection OK. Listing tools...\n")
-#             tools = await list_tools(session)
+    The check is intentionally cheap: open a streamable-HTTP transport, run
+    `initialize()` (handled inside `create_mcp_client`), then `list_tools()`.
+    A working MCP server replies in well under a second; anything else is
+    rejected with a human-readable error.
 
-#         if not tools:
-#             print("Server returned no tools.")
-#             return
+    Raises `InvalidMcpEndpoint` for bad URL syntax, transport failures,
+    handshake timeouts, or a response that doesn't parse as MCP.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise InvalidMcpEndpoint(
+            f"URL scheme must be http or https, got '{parsed.scheme or '(none)'}'"
+        )
+    if not parsed.netloc:
+        raise InvalidMcpEndpoint("URL is missing a host")
 
-#         print(f"{len(tools)} tool(s) found:\n")
-#         for t in tools:
-#             print(t.all_text_fields)
-#             print(f"  {t.name}")
-#             if t.description:
-#                 print(f"    {t.description.strip()}")
-#             if t.input_schema:
-#                 print(f"    schema: {t.input_schema}")
-
-#     asyncio.run(_test())
+    try:
+        async with asyncio.timeout(timeout):
+            async with create_mcp_client(url=url) as session:
+                tools = await session.list_tools()
+                return {
+                    "ok": True,
+                    "url": url,
+                    "tool_count": len(tools.tools),
+                    "tools": [t.name for t in tools.tools],
+                }
+    except asyncio.TimeoutError as exc:
+        raise InvalidMcpEndpoint(
+            f"MCP handshake timed out after {timeout}s — server is unreachable "
+            f"or not speaking MCP over streamable-HTTP"
+        ) from exc
+    except (ConnectionError, OSError) as exc:
+        raise InvalidMcpEndpoint(f"Could not reach endpoint: {exc}") from exc
+    except InvalidMcpEndpoint:
+        raise
+    except Exception as exc:
+        raise InvalidMcpEndpoint(
+            f"Endpoint did not respond as an MCP server: {type(exc).__name__}: {exc}"
+        ) from exc

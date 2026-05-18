@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(mkdir -p /src/mcpscan/detectors/static mcp-scanner/src/mcpscan/detectors/dynamic mcp-scanner/src/mcpscan/reporter/templates mcp-scanner/tests/fixtures/malicious_servers)"
+      "Bash(mkdir -p /src/mcpscan/detectors/static mcp-scanner/src/mcpscan/detectors/dynamic mcp-scanner/src/mcpscan/reporter/templates mcp-scanner/tests/fixtures/malicious_servers)",
+      "Bash(kill bulntam5u *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\harsh\\PycharmProjects\\mcp-sentry\\src\\mcpscan\\detectors"
