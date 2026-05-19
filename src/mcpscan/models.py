@@ -55,3 +55,4 @@ class ScanReport(BaseModel):
     score: int           # 0-100
     grade: str           # A+ through F
     scan_duration_ms: int
+    notes: list[str] = []  # operational notes (e.g. "dynamic phase skipped: auth required")

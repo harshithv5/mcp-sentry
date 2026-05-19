@@ -12,6 +12,47 @@ class InvalidMcpEndpoint(ValueError):
     """Raised when a URL is not a usable MCP endpoint."""
 
 
+class UnauthorizedMcpEndpoint(InvalidMcpEndpoint):
+    """Raised when the MCP server returns 401/403 — auth-gated, not public."""
+
+
+_AUTH_GATE_MARKERS: tuple[str, ...] = (
+    "401", "unauthorized",
+    "402", "payment required",
+    "403", "forbidden",
+)
+
+
+def _is_auth_error(exc: BaseException) -> bool:
+    """Best-effort detection of an auth/paywall gate inside an exception chain.
+
+    Catches 401 (Unauthorized), 402 (Payment Required) and 403 (Forbidden) —
+    all three mean "we cannot proceed without credentials/payment", which from
+    a scanner's perspective behaves identically: the endpoint is gated.
+
+    `streamable_http_client` wraps httpx errors in an anyio TaskGroup
+    `ExceptionGroup`, so we walk both `__cause__`/`__context__` and any nested
+    `.exceptions` (BaseExceptionGroup) and match on the string representation.
+    """
+    seen: set[int] = set()
+    stack: list[BaseException] = [exc]
+    while stack:
+        cur = stack.pop()
+        if cur is None or id(cur) in seen:
+            continue
+        seen.add(id(cur))
+        text = f"{type(cur).__name__}: {cur}".lower()
+        if any(marker in text for marker in _AUTH_GATE_MARKERS):
+            return True
+        if isinstance(cur, BaseExceptionGroup):
+            stack.extend(cur.exceptions)
+        if cur.__cause__ is not None:
+            stack.append(cur.__cause__)
+        if cur.__context__ is not None:
+            stack.append(cur.__context__)
+    return False
+
+
 @asynccontextmanager
 async def create_mcp_client(url: str):
     """Connect to an MCP server at *url* and yield an initialised ClientSession."""
@@ -69,10 +110,20 @@ async def validate_mcp_endpoint(url: str, *, timeout: float = 5.0) -> dict:
             f"or not speaking MCP over streamable-HTTP"
         ) from exc
     except (ConnectionError, OSError) as exc:
+        if _is_auth_error(exc):
+            raise UnauthorizedMcpEndpoint(
+                "MCP server is gated (401/402/403). mcp-sentry only scans "
+                "publicly-deployed MCP servers."
+            ) from exc
         raise InvalidMcpEndpoint(f"Could not reach endpoint: {exc}") from exc
     except InvalidMcpEndpoint:
         raise
     except Exception as exc:
+        if _is_auth_error(exc):
+            raise UnauthorizedMcpEndpoint(
+                "MCP server is gated (401/402/403). mcp-sentry only scans "
+                "publicly-deployed MCP servers."
+            ) from exc
         raise InvalidMcpEndpoint(
             f"Endpoint did not respond as an MCP server: {type(exc).__name__}: {exc}"
         ) from exc

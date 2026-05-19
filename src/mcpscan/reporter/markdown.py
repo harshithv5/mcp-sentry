@@ -41,6 +41,13 @@ def render_markdown(report: ScanReport) -> str:
     lines.append(f"- **Duration**: {report.scan_duration_ms} ms")
     lines.append("")
 
+    if report.notes:
+        lines.append("## Notes")
+        lines.append("")
+        for note in report.notes:
+            lines.append(f"- {note}")
+        lines.append("")
+
     if not report.findings:
         lines.append("## Result")
         lines.append("")
