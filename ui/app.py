@@ -34,6 +34,57 @@ SEVERITY_EMOJI = {
     "info": "⬜",
 }
 
+# Friendly one-line headlines per status the API (or the client) can return.
+# status_code 0 means the request never reached the server (network error).
+ERROR_HEADLINES = {
+    0: "Couldn't reach the scan API",
+    401: "Server requires authentication",
+    422: "Not a scannable MCP endpoint",
+    502: "Scan failed",
+}
+
+
+def _humanize_error(res: dict) -> tuple[str, str, str]:
+    """Turn an error response into readable ``(headline, message, hint)`` text.
+
+    The API returns ``detail`` as a string, a dict (``{reason, hint, ...}``), or
+    a list (FastAPI/pydantic validation errors). Network failures arrive as
+    ``status_code`` 0 with ``{"detail": str(exc)}``. Everything is reduced to
+    plain strings so the UI never has to dump raw JSON at the user.
+    """
+    status = res.get("status_code", 0)
+    data = res.get("data", {}) or {}
+    detail = data.get("detail", data) if isinstance(data, dict) else data
+
+    headline = ERROR_HEADLINES.get(status, f"Request failed (HTTP {status})")
+    message = ""
+    hint = ""
+
+    if isinstance(detail, dict):
+        message = str(detail.get("reason") or detail.get("msg") or "").strip()
+        hint = str(detail.get("hint") or "").strip()
+        if not message:
+            message = "; ".join(f"{k}: {v}" for k, v in detail.items())
+    elif isinstance(detail, list):
+        # pydantic validation errors: [{"loc": [...], "msg": "...", ...}, ...]
+        parts: list[str] = []
+        for item in detail:
+            if isinstance(item, dict):
+                loc = ".".join(
+                    str(p) for p in item.get("loc", []) if p != "body"
+                )
+                msg = item.get("msg", "")
+                parts.append(f"{loc}: {msg}" if loc else str(msg))
+            else:
+                parts.append(str(item))
+        message = "; ".join(p for p in parts if p)
+    else:
+        message = str(detail).strip()
+
+    if not message:
+        message = "No further detail was provided by the server."
+    return headline, message, hint
+
 
 def _post_scan(api_url: str, target_url: str, payload: dict, timeout: int) -> dict:
     body = {"target_url": target_url, **payload}
@@ -249,8 +300,11 @@ def main() -> None:
                         f"({elapsed:.1f}s)"
                     )
                 else:
+                    headline, _, _ = _humanize_error(res)
+                    code = res["status_code"]
+                    prefix = f"HTTP {code}, " if code else ""
                     st.write(
-                        f"❌ `{url}` — HTTP {res['status_code']} ({elapsed:.1f}s)"
+                        f"❌ `{url}` — {headline} ({prefix}{elapsed:.1f}s)"
                     )
             progress.progress(i / len(urls), text=f"Done {url}")
 
@@ -268,10 +322,13 @@ def main() -> None:
             if res["ok"]:
                 _render_report(res["data"])
             else:
-                st.error(
-                    f"**{url}** — request failed (HTTP {res['status_code']})"
-                )
-                st.json(res["data"])
+                headline, message, hint = _humanize_error(res)
+                st.markdown(f"### {url}")
+                st.error(f"**{headline}**\n\n{message}")
+                if hint:
+                    st.info(f"💡 {hint}")
+                with st.expander("Technical details", expanded=False):
+                    st.json(res["data"])
             st.markdown("---")
 
 

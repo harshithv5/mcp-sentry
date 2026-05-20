@@ -15,7 +15,12 @@ from datetime import datetime
 
 from mcp import ClientSession
 
-from .client import _is_auth_error, create_mcp_client, list_tools
+from .client import (
+    _is_auth_error,
+    create_mcp_client,
+    describe_transport_error,
+    list_tools,
+)
 from .detectors.base import Detector, DynamicDetector
 from .detectors.dynamic.credential_probe import CredentialProbeDetector
 from .detectors.dynamic.echo_test import EchoTestDetector
@@ -128,7 +133,16 @@ async def _run_dynamic(
                     f"dynamic phase aborted at tool {tool.name!r}: "
                     f"server requires authentication"
                 )
-            raise
+            # Non-auth failure on a single tool (bad-arg rejection, a tool that
+            # errors, etc.): log it and keep probing the rest. If the transport
+            # itself died, the next call or session teardown resurfaces it and
+            # build_report records it as a note.
+            logger.warning(
+                "Dynamic probe error on tool %r: %s",
+                tool.name,
+                describe_transport_error(exc),
+            )
+            continue
     return findings, None
 
 
@@ -176,8 +190,10 @@ async def build_report(
             )
         )
 
-    # Phase 2 — dynamic probes need a live session. Auth failures here are
-    # isolated: keep the static/semantic findings and flag the report.
+    # Phase 2 — dynamic probes need a live session. This phase is best-effort:
+    # any failure (auth gate, a 4xx/5xx from the transport, a dropped session)
+    # is isolated so the static + semantic findings are still returned with a
+    # note explaining what happened, rather than failing the whole scan.
     if not skip_dynamic:
         try:
             async with create_mcp_client(url=target_url) as session:
@@ -198,7 +214,17 @@ async def build_report(
                     "tool invocation (static and semantic findings still reported)"
                 )
             else:
-                raise
+                summary = describe_transport_error(exc)
+                logger.warning(
+                    "Dynamic phase skipped for %s: %s",
+                    target_url,
+                    summary,
+                    exc_info=True,
+                )
+                notes.append(
+                    f"dynamic phase skipped: server rejected tool invocation "
+                    f"({summary}); static and semantic findings still reported"
+                )
 
     score, grade = _score(findings)
     elapsed_ms = int((datetime.now() - started).total_seconds() * 1000)

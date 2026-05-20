@@ -20,6 +20,7 @@ from .client import (
     InvalidMcpEndpoint,
     UnauthorizedMcpEndpoint,
     _is_auth_error,
+    describe_transport_error,
     validate_mcp_endpoint,
 )
 from .orchestrator import build_report
@@ -122,7 +123,14 @@ async def scan(req: ScanRequest):
                             "Authentication-gated servers are not supported.",
                 },
             ) from exc
-        raise HTTPException(status_code=502, detail=f"Scan failed: {exc}") from exc
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "target_url": target_url,
+                "reason": f"Scan failed before any tools could be enumerated: "
+                          f"{describe_transport_error(exc)}",
+            },
+        ) from exc
 
 
 def _serve() -> None:

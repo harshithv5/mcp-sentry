@@ -53,6 +53,41 @@ def _is_auth_error(exc: BaseException) -> bool:
     return False
 
 
+def describe_transport_error(exc: BaseException) -> str:
+    """Reduce a (possibly nested) transport exception to one readable line.
+
+    `streamable_http_client` wraps httpx errors in an anyio `ExceptionGroup`,
+    so the top-level `str(exc)` is uselessly generic ("unhandled errors in a
+    TaskGroup"). We walk the same chain `_is_auth_error` does and prefer an
+    HTTP status line (e.g. "HTTP 400 Bad Request") when an httpx-style error is
+    present, falling back to the first concrete leaf exception otherwise.
+    """
+    seen: set[int] = set()
+    stack: list[BaseException] = [exc]
+    http_summary: str | None = None
+    leaf_summary: str | None = None
+    while stack:
+        cur = stack.pop()
+        if cur is None or id(cur) in seen:
+            continue
+        seen.add(id(cur))
+        # httpx.HTTPStatusError (duck-typed) exposes .response.status_code.
+        response = getattr(cur, "response", None)
+        status = getattr(response, "status_code", None)
+        if status is not None and http_summary is None:
+            reason = (getattr(response, "reason_phrase", "") or "").strip()
+            http_summary = f"HTTP {status} {reason}".strip()
+        if not isinstance(cur, BaseExceptionGroup) and leaf_summary is None:
+            leaf_summary = f"{type(cur).__name__}: {cur}"
+        if isinstance(cur, BaseExceptionGroup):
+            stack.extend(cur.exceptions)
+        if cur.__cause__ is not None:
+            stack.append(cur.__cause__)
+        if cur.__context__ is not None:
+            stack.append(cur.__context__)
+    return http_summary or leaf_summary or f"{type(exc).__name__}: {exc}"
+
+
 @asynccontextmanager
 async def create_mcp_client(url: str):
     """Connect to an MCP server at *url* and yield an initialised ClientSession."""
