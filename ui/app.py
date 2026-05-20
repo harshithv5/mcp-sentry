@@ -13,10 +13,16 @@ from __future__ import annotations
 
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 import requests
 import streamlit as st
+from dotenv import load_dotenv
+
+# Load ui/.env (sitting next to this file) so MCPSCAN_API_URL is available
+# regardless of the directory streamlit is launched from.
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 DEFAULT_API = os.environ.get("MCPSCAN_API_URL", "http://127.0.0.1:8000")
 SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"]
@@ -124,7 +130,12 @@ def main() -> None:
 
     with st.sidebar:
         st.subheader("API")
-        api_url = st.text_input("Scan endpoint", value=DEFAULT_API)
+        api_url = st.text_input(
+            "Scan endpoint",
+            value=DEFAULT_API,
+            disabled=True,
+            help="Fixed from MCPSCAN_API_URL in ui/.env.",
+        )
         timeout = st.number_input(
             "Request timeout (seconds)", min_value=30, max_value=900, value=300, step=30
         )
@@ -173,66 +184,95 @@ def main() -> None:
         height=140,
         placeholder="https://example.com/mcp\nhttps://another.example.com/mcp",
     )
-    scan_clicked = st.button("🔎 Scan", type="primary", use_container_width=True)
+    # Per-session flags: `scanning` gates the button; `results` holds the last
+    # completed run so it survives the rerun that re-enables the button.
+    if "scanning" not in st.session_state:
+        st.session_state.scanning = False
+    if "results" not in st.session_state:
+        st.session_state.results = None
 
-    if not scan_clicked:
-        return
+    scan_clicked = st.button(
+        "⏳ Scanning…" if st.session_state.scanning else "🔎 Scan",
+        type="primary",
+        use_container_width=True,
+        disabled=st.session_state.scanning,
+    )
 
-    urls = [u.strip() for u in urls_text.splitlines() if u.strip()]
-    if not urls:
-        st.error("Add at least one MCP URL to scan.")
-        return
-
-    payload = {
-        "skip_dynamic": skip_dynamic,
-        "enable_ssrf": enable_ssrf,
-        "enable_llm_judge": enable_llm_judge,
-        "judge_threshold": judge_threshold,
-    }
-
-    progress = st.progress(0.0, text="Starting scan…")
-    status = st.status("Scanning MCP servers", expanded=True)
-    results: list[tuple[str, dict]] = []
-
-    for i, url in enumerate(urls, start=1):
-        with status:
-            st.write(f"**[{i}/{len(urls)}]** Connecting to `{url}`…")
-        progress.progress((i - 1) / len(urls), text=f"Scanning {url}")
-        started = time.time()
-        try:
-            res = _post_scan(api_url, url, payload, timeout=timeout)
-        except requests.RequestException as exc:
-            res = {"status_code": 0, "ok": False, "data": {"detail": str(exc)}}
-        elapsed = time.time() - started
-        results.append((url, res))
-        with status:
-            if res["ok"]:
-                grade = res["data"].get("grade", "?")
-                findings = len(res["data"].get("findings", []) or [])
-                st.write(
-                    f"✅ `{url}` — grade **{grade}**, {findings} findings "
-                    f"({elapsed:.1f}s)"
-                )
-            else:
-                st.write(
-                    f"❌ `{url}` — HTTP {res['status_code']} ({elapsed:.1f}s)"
-                )
-        progress.progress(i / len(urls), text=f"Done {url}")
-
-    status.update(label="Scan complete", state="complete", expanded=False)
-    progress.empty()
-
-    st.markdown("---")
-    st.markdown("## Results")
-    for url, res in results:
-        if res["ok"]:
-            _render_report(res["data"])
+    # Click: snapshot inputs, flip into the scanning state, and rerun so the
+    # button immediately re-renders disabled before any network work starts.
+    if scan_clicked:
+        urls = [u.strip() for u in urls_text.splitlines() if u.strip()]
+        if not urls:
+            st.error("Add at least one MCP URL to scan.")
         else:
-            st.error(
-                f"**{url}** — request failed (HTTP {res['status_code']})"
-            )
-            st.json(res["data"])
+            st.session_state.results = None
+            st.session_state.scan_job = {
+                "api_url": api_url,
+                "timeout": int(timeout),
+                "urls": urls,
+                "payload": {
+                    "skip_dynamic": skip_dynamic,
+                    "enable_ssrf": enable_ssrf,
+                    "enable_llm_judge": enable_llm_judge,
+                    "judge_threshold": judge_threshold,
+                },
+            }
+            st.session_state.scanning = True
+            st.rerun()
+
+    # Scanning run: button is already disabled. Stream per-URL progress, store
+    # results, then rerun to re-enable the button and render the report.
+    if st.session_state.scanning:
+        job = st.session_state.scan_job
+        urls = job["urls"]
+        progress = st.progress(0.0, text="Starting scan…")
+        status = st.status("Scanning MCP servers", expanded=True)
+        results: list[tuple[str, dict]] = []
+
+        for i, url in enumerate(urls, start=1):
+            with status:
+                st.write(f"**[{i}/{len(urls)}]** Connecting to `{url}`…")
+            progress.progress((i - 1) / len(urls), text=f"Scanning {url}")
+            started = time.time()
+            try:
+                res = _post_scan(job["api_url"], url, job["payload"], timeout=job["timeout"])
+            except requests.RequestException as exc:
+                res = {"status_code": 0, "ok": False, "data": {"detail": str(exc)}}
+            elapsed = time.time() - started
+            results.append((url, res))
+            with status:
+                if res["ok"]:
+                    grade = res["data"].get("grade", "?")
+                    findings = len(res["data"].get("findings", []) or [])
+                    st.write(
+                        f"✅ `{url}` — grade **{grade}**, {findings} findings "
+                        f"({elapsed:.1f}s)"
+                    )
+                else:
+                    st.write(
+                        f"❌ `{url}` — HTTP {res['status_code']} ({elapsed:.1f}s)"
+                    )
+            progress.progress(i / len(urls), text=f"Done {url}")
+
+        status.update(label="Scan complete", state="complete", expanded=False)
+        progress.empty()
+        st.session_state.results = results
+        st.session_state.scanning = False
+        st.rerun()
+
+    # Render the last completed scan (persists across the re-enable rerun).
+    if st.session_state.results:
         st.markdown("---")
+        st.markdown("## Results")
+        for url, res in st.session_state.results:
+            if res["ok"]:
+                _render_report(res["data"])
+            else:
+                st.error(
+                    f"**{url}** — request failed (HTTP {res['status_code']})"
+                )
+                st.json(res["data"])
+            st.markdown("---")
 
 
 if __name__ == "__main__":
