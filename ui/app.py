@@ -24,7 +24,7 @@ from dotenv import load_dotenv
 # regardless of the directory streamlit is launched from.
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-DEFAULT_API = os.environ.get("MCPSCAN_API_URL", "http://127.0.0.1:8000")
+DEFAULT_API = os.environ.get("MCPSCAN_API_URL", "https://mcp-sentry-nqli.onrender.com")
 SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"]
 SEVERITY_EMOJI = {
     "critical": "🟥",
